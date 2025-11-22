@@ -1,0 +1,24 @@
+data:
+  # Path to the raw DICOM data on Kaggle
+  raw_dir: "/kaggle/input/siim-acr-pneumothorax-segmentation-data/dicom-images-train"
+  
+  # Path to the raw RLE csv file
+  raw_csv_path: "/kaggle/input/siim-acr-pneumothorax-segmentation-data/train-rle.csv"
+  
+  # Output directory for processed PNGs
+  processed_dir: "/kaggle/working/data-processed_256"
+  
+  # Image dimensions for resizing
+  img_height: 256
+  img_width: 256
+  
+  # Data splitting ratios
+  split_ratios:
+    train: 0.85
+    val: 0.15
+  
+  # Seed for reproducibility
+  random_state: 42
+  
+  # Number of CPU workers for parallel processing
+  num_workers: 4

@@ -1,0 +1,15 @@
+# --- Core Libraries ---
+numpy
+pandas
+matplotlib
+tqdm
+pyyaml
+scikit-learn
+joblib
+
+# --- Image Processing ---
+opencv-python
+pydicom
+
+# --- Deep Learning Utilities ---
+timm
