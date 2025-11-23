@@ -50,9 +50,11 @@ class DataPreprocessor:
 
     def _process_single_image(self, image_id, split_name, path_map, rle_df=None):
         """
-        Processes a single image. Handles errors gracefully.
+        Processes a single image: reads DICOM, resizes, handles mask, and saves as PNG.
+        Designed to be run in parallel.
         """
         try:
+            # 1. Load DICOM
             dicom_path = path_map.get(image_id)
             if not dicom_path:
                 return None
@@ -60,15 +62,15 @@ class DataPreprocessor:
             dicom_data = pydicom.dcmread(dicom_path)
             image = dicom_data.pixel_array
 
-            # Resize Image
+            # 2. Resize Image (INTER_AREA is better for shrinking)
             img_resized = cv2.resize(image, (self.width, self.height), interpolation=cv2.INTER_AREA)
 
-            # Handle Mask
+            # 3. Handle Mask (Only if RLE data is provided)
             mask_save_path = ""
-            has_pneumothorax = -1 
+            has_pneumothorax = -1 # Default for unknown/test
 
             if rle_df is not None:
-                # Filter entries for the specific image ID
+                # Retrieve RLE strings
                 rle_entries = rle_df[rle_df['ImageId'] == image_id][' EncodedPixels'].values
                 
                 orig_h, orig_w = image.shape
@@ -76,21 +78,29 @@ class DataPreprocessor:
                 
                 has_pneumothorax = 0
 
-                # Check if list exists and the first element implies presence
-                if len(rle_entries) > 0 and rle_entries[0] != '-1':
-                    has_pneumothorax = 1
-                    for rle in rle_entries:
-                        if rle != '-1':
-                            mask = rle_to_mask(rle, orig_h, orig_w)
-                            final_mask = np.logical_or(final_mask, mask)
-                    final_mask = final_mask.astype(np.uint8)
+                # FIX: Add .strip() to handle leading spaces in CSV (e.g. ' -1')
+                if len(rle_entries) > 0:
+                    first_rle = str(rle_entries[0]).strip()
+                    
+                    if first_rle != '-1':
+                        has_pneumothorax = 1
+                        for rle in rle_entries:
+                            clean_rle = str(rle).strip()
+                            if clean_rle != '-1':
+                                mask = rle_to_mask(clean_rle, orig_h, orig_w)
+                                # Combine masks using logical OR
+                                final_mask = np.logical_or(final_mask, mask)
+                        final_mask = final_mask.astype(np.uint8)
 
+                # Resize Mask (INTER_NEAREST to keep binary values 0/1)
                 mask_resized = cv2.resize(final_mask, (self.width, self.height), interpolation=cv2.INTER_NEAREST)
                 
+                # Save Mask
                 mask_save_path = os.path.join(self.processed_dir, split_name, 'masks', f"{image_id}.png")
+                # Scale 0/1 to 0/255 for PNG format visibility
                 cv2.imwrite(mask_save_path, mask_resized * 255)
 
-            # Save Image
+            # 4. Save Image
             img_save_path = os.path.join(self.processed_dir, split_name, 'images', f"{image_id}.png")
             cv2.imwrite(img_save_path, img_resized)
 
@@ -103,8 +113,8 @@ class DataPreprocessor:
             }
 
         except Exception as e:
-            # Return exception message to main loop for logging
-            return f"ERROR: {str(e)}"
+            # Log the specific error and ID but do not crash the pipeline
+            return f"ERROR processing {image_id}: {str(e)}"
 
     def _process_dataset_split(self, id_list, split_name, path_map, rle_df=None):
         """
