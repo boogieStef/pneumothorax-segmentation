@@ -11,8 +11,9 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from src.environment import EnvironmentSetup
 from src.utils import load_config
 from src.dataset import PneumoDataset
-from src.model import MultiTaskUNet
-from src.loss import CombinedLoss
+# --- FIX: Changed from MultiTaskUNet to ModelFactory ---
+from src.model import ModelFactory 
+from src.loss import SegmentationLoss
 from src.trainer import Trainer
 
 def validate_env():
@@ -33,7 +34,9 @@ def main():
     config = load_config(args.config)
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"[INFO] Training on device: {device}")
+    # Check if 'architecture' key exists, fallback for older configs if needed
+    arch = config['train'].get('architecture', 'Unknown')
+    print(f"[INFO] Device: {device} | Model Architecture: {arch}")
 
     # 3. Data Preparation
     data_dir = config['data']['dataset_dir']
@@ -44,36 +47,36 @@ def main():
         return
 
     df = pd.read_csv(csv_path)
+    
+    # Split DataFrames based on 'Split' column
     train_df = df[df['Split'] == 'train'].reset_index(drop=True)
     val_df = df[df['Split'] == 'val'].reset_index(drop=True)
+    test_df = df[df['Split'] == 'test'].reset_index(drop=True)
     
-    print(f"[INFO] Train set: {len(train_df)} | Val set: {len(val_df)}")
+    print(f"[INFO] Dataset Loaded.")
+    print(f"       Train: {len(train_df)} samples")
+    print(f"       Val:   {len(val_df)} samples")
+    print(f"       Test:  {len(test_df)} samples")
 
+    # Create Datasets
+    # Train has augmentation enabled via phase='train'
     train_ds = PneumoDataset(train_df, data_dir, phase='train', config=config)
     val_ds = PneumoDataset(val_df, data_dir, phase='val', config=config)
+    test_ds = PneumoDataset(test_df, data_dir, phase='test', config=config)
 
-    train_loader = DataLoader(
-        train_ds, 
-        batch_size=config['train']['batch_size'], 
-        shuffle=True, 
-        num_workers=config['data']['num_workers'],
-        pin_memory=True
-    )
-    val_loader = DataLoader(
-        val_ds, 
-        batch_size=config['train']['batch_size'], 
-        shuffle=False, 
-        num_workers=config['data']['num_workers'],
-        pin_memory=True
-    )
+    # Create Loaders
+    num_workers = config['data']['num_workers']
+    batch_size = config['train']['batch_size']
+    
+    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=num_workers, pin_memory=True)
+    val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False, num_workers=num_workers, pin_memory=True)
+    test_loader = DataLoader(test_ds, batch_size=batch_size, shuffle=False, num_workers=num_workers, pin_memory=True)
 
     # 4. Model & Optimization
-    model = MultiTaskUNet(
-        encoder_name=config['train']['encoder_name'],
-        pretrained=config['train']['pretrained']
-    ).to(device)
+    # --- FIX: Use ModelFactory to create the model ---
+    model = ModelFactory.create(config).to(device)
     
-    loss_fn = CombinedLoss(config).to(device)
+    loss_fn = SegmentationLoss().to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=config['train']['learning_rate'])
 
     # 5. Trainer
@@ -86,7 +89,11 @@ def main():
         config=config
     )
     
+    # Run Training Loop
     trainer.fit()
+    
+    # Run Final Evaluation on Test Set
+    trainer.evaluate(test_loader)
 
 if __name__ == "__main__":
     main()
