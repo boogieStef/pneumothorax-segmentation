@@ -4,40 +4,46 @@ data:
   # Path to the raw DICOM TRAINING data directory on Kaggle
   raw_train_dir: "/kaggle/input/siim-acr-pneumothorax-segmentation-data/dicom-images-train"
   
-  # Path to the raw DICOM TEST data directory on Kaggle
-  raw_test_dir: "/kaggle/input/siim-acr-pneumothorax-segmentation-data/dicom-images-test"
-  
   # Path to the raw RLE csv file
   raw_csv_path: "/kaggle/input/siim-acr-pneumothorax-segmentation-data/train-rle.csv"
   
-  # Directory where the baked dataset is located (Kaggle Input)
-  # IMPORTANT: Update this path to match your created Dataset name from Phase 1
-  dataset_dir: "/kaggle/input/siim-pneumothorax-256-png/pneumo_processed"
+  # Output directory for processed PNGs
+  processed_dir: "/kaggle/working/pneumo_processed"
   
+  # Target image dimensions
   img_height: 256
   img_width: 256
   
-  num_workers: 2
+  # Data splitting ratios for the LABELED dataset
+  # Train: For learning weights
+  # Val: For checkpointing and tuning
+  # Test: For final evaluation metrics (Internal Test Set)
+  split_ratios:
+    train: 0.70
+    val: 0.15
+    test: 0.15
+  
+  # Random seed
+  random_state: 42
+  
+  # Number of CPU workers
+  num_workers: 4
 
 train:
-  # Experiment name for saving files
-  experiment_name: "resnet34_test1_no-augmentation"
+  experiment_name: "resnet34_segmentation_v1"
   
-  # Model architecture
-  encoder_name: "resnet34"
+  # Architecture selection: "unet_resnet34" or "deeplabv3"
+  architecture: "unet_resnet34"
+  
   pretrained: true
   
-  # Hyperparameters
   batch_size: 16
   epochs: 25
   learning_rate: 0.0001
   
-  # Loss weights (Multi-task learning)
-  # Total = w_seg * SegLoss + w_cls * ClsLoss
-  weight_segmentation: 1.0
-  weight_classification: 0.5
+  # Classification threshold based on pixel count
+  pixel_threshold: 100
   
-  # Augmentation parameters
-  use_augmentation: false
+  use_augmentation: true
   aug_prob: 0.5
   aug_rotate_limit: 15
