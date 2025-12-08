@@ -1,0 +1,22 @@
+data:
+  raw_train_dir: "/kaggle/input/siim-acr-pneumothorax-segmentation-data/dicom-images-train"
+  raw_test_dir: "/kaggle/input/siim-acr-pneumothorax-segmentation-data/dicom-images-test"
+  raw_csv_path: "/kaggle/input/siim-acr-pneumothorax-segmentation-data/train-rle.csv"
+  dataset_dir: "/kaggle/input/siim-pneumothorax-256-png/pneumo_processed"
+  img_height: 256
+  img_width: 256
+  num_workers: 2
+
+train:
+  experiment_name: "exp1_unet_resnet34_no_aug"
+  architecture: "unet_resnet34"
+  pretrained: true
+  batch_size: 16
+  epochs: 25
+  learning_rate: 0.0001
+  pixel_threshold: 100
+  
+  # NO AUGMENTATION
+  use_augmentation: false
+  aug_prob: 0.0
+  aug_rotate_limit: 0

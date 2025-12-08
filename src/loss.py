@@ -1,51 +1,33 @@
 import torch
 import torch.nn as nn
 
-class DiceLoss(nn.Module):
+class SegmentationLoss(nn.Module):
     """
-    Calculates Dice Loss for binary segmentation.
-    Loss = 1 - DiceCoefficient
+    Loss function for binary segmentation.
+    Combines Dice Loss and BCEWithLogitsLoss.
     """
     def __init__(self, smooth=1e-6):
-        super(DiceLoss, self).__init__()
+        super().__init__()
+        self.bce = nn.BCEWithLogitsLoss()
         self.smooth = smooth
 
     def forward(self, logits, targets):
-        # Apply sigmoid to logits
+        # 1. BCE Loss (Pixel-wise accuracy)
+        bce_loss = self.bce(logits, targets)
+        
+        # 2. Dice Loss (Overlap quality)
         probs = torch.sigmoid(logits)
         
-        # Flatten
-        probs = probs.view(-1)
-        targets = targets.view(-1)
+        # Flatten tensors
+        probs_flat = probs.view(-1)
+        targets_flat = targets.view(-1)
         
-        intersection = (probs * targets).sum()
-        union = probs.sum() + targets.sum()
+        intersection = (probs_flat * targets_flat).sum()
+        # Dice Coeff = (2 * Intersection) / (Sum of elements)
+        dice_score = (2. * intersection + self.smooth) / (probs_flat.sum() + targets_flat.sum() + self.smooth)
         
-        dice = (2. * intersection + self.smooth) / (union + self.smooth)
-        return 1.0 - dice
-
-class CombinedLoss(nn.Module):
-    """
-    Combines Segmentation Loss (Dice + BCE) and Classification Loss (BCE).
-    """
-    def __init__(self, config):
-        super(CombinedLoss, self).__init__()
-        self.w_seg = config['train']['weight_segmentation']
-        self.w_cls = config['train']['weight_classification']
+        # Dice Loss = 1 - Dice Coeff
+        dice_loss = 1.0 - dice_score
         
-        self.dice_loss = DiceLoss()
-        self.bce_loss = nn.BCEWithLogitsLoss()
-
-    def forward(self, seg_logits, seg_targets, cls_logits, cls_targets):
-        # 1. Segmentation Loss
-        loss_dice = self.dice_loss(seg_logits, seg_targets)
-        loss_bce_seg = self.bce_loss(seg_logits, seg_targets)
-        total_seg_loss = 0.5 * loss_dice + 0.5 * loss_bce_seg
-        
-        # 2. Classification Loss
-        loss_cls = self.bce_loss(cls_logits, cls_targets)
-        
-        # 3. Weighted Sum
-        total_loss = (self.w_seg * total_seg_loss) + (self.w_cls * loss_cls)
-        
-        return total_loss, total_seg_loss, loss_cls
+        # Combine: 50% BCE + 50% Dice Loss
+        return 0.5 * bce_loss + 0.5 * dice_loss
