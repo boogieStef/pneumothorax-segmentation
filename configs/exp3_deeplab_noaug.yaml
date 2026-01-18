@@ -9,7 +9,8 @@ data:
 
 train:
   experiment_name: "exp3_deeplab_no_aug"
-  architecture: "deeplabv3"
+  architecture: "DeepLabV3"
+  encoder_name: "resnet50"
   pretrained: true
   batch_size: 16
   epochs: 25

@@ -9,7 +9,8 @@ data:
 
 train:
   experiment_name: "exp1_unet_resnet34_no_aug"
-  architecture: "unet_resnet34"
+  architecture: "Unet"
+  encoder_name: "resnet34"
   pretrained: true
   batch_size: 16
   epochs: 25

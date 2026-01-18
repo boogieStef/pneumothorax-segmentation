@@ -13,3 +13,5 @@ pydicom
 
 # --- Deep Learning Utilities ---
 timm
+segmentation-models-pytorch
+tensorboard

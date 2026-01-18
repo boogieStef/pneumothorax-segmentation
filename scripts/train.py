@@ -16,16 +16,11 @@ from src.model import ModelFactory
 from src.loss import SegmentationLoss
 from src.trainer import Trainer
 
-def validate_env():
-    print("[INFO] Validating environment...")
-    req_path = os.path.join(os.path.dirname(__file__), '..', 'requirements.txt')
-    setup = EnvironmentSetup(req_path)
-    setup.smart_install()
-    setup.check_cuda()
-
 def main():
     # 1. Environment
-    validate_env()
+    setup = EnvironmentSetup()
+    setup.validate_and_install_smp() # Instalacja bibliotek
+    setup.validate_gpu_forward_pass() # Test "Kernel Dead"
     
     # 2. Config
     parser = argparse.ArgumentParser()
