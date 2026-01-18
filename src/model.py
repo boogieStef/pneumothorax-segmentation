@@ -40,7 +40,7 @@ class ModelFactory:
         model = model_fn(
             encoder_name=encoder_name,
             encoder_weights=encoder_weights,
-            in_channels=3,
+            in_channels=1,
             classes=num_classes,
             activation=None # Zwracamy surowe logity (Loss function ma w sobie sigmoid)
         )

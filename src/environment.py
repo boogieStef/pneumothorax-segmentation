@@ -74,12 +74,12 @@ class EnvironmentSetup:
             model = smp.Unet(
                 encoder_name="resnet18", # Lekki encoder do testu
                 encoder_weights=None,    # Nie pobieramy wag do testu, szkoda czasu
-                in_channels=3,           # Ważne: Twój Dataset zwraca RGB (3 kanały)
+                in_channels=1,           # Ważne: Twój Dataset zwraca RGB (3 kanały)
                 classes=1
             ).to(device)
 
             # Dummy data: Batch=2, Channels=3, 256x256
-            dummy_input = torch.randn(2, 3, 256, 256).to(device)
+            dummy_input = torch.randn(2, 1, 256, 256).to(device)
 
             print("[TEST] Running forward pass...")
             with torch.no_grad():
