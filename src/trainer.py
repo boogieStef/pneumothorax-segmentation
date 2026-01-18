@@ -39,9 +39,14 @@ class Trainer:
             train_metrics = self._train_epoch()
             print(f"TRAIN | Loss: {train_metrics['loss']:.4f}")
             
-            # 2. Validation Phase
+            # 2. Validation
             val_metrics = self._validate_epoch(self.val_loader)
-            print(f"VALID | Loss: {val_metrics['loss']:.4f} | Dice: {val_metrics['dice']:.4f} | IoU: {val_metrics['iou']:.4f}")
+            print(f"VALID | Loss: {val_metrics['loss']:.4f} | Dice: {val_metrics['dice']:.4f}")
+            # Dodaj nową linię:
+            print(f"      | Sens: {val_metrics['sensitivity']:.4f} | Spec: {val_metrics['specificity']:.4f} | Acc: {val_metrics['accuracy']:.4f}")
+            
+            self.writer.add_scalar("Metric/Sensitivity", val_metrics['sensitivity'], epoch)
+            self.writer.add_scalar("Metric/Specificity", val_metrics['specificity'], epoch)
             
             # 3. Checkpointing
             if val_metrics['dice'] > self.best_score:
@@ -82,6 +87,10 @@ class Trainer:
         print(f"Test Loss: {test_metrics['loss']:.4f}")
         print(f"Test Dice: {test_metrics['dice']:.4f}")
         print(f"Test IoU:  {test_metrics['iou']:.4f}")
+        print("-" * 20)
+        print(f"Sensitivity (Recall): {test_metrics['sensitivity']:.4f}")
+        print(f"Specificity:          {test_metrics['specificity']:.4f}")
+        print(f"Classification Acc:   {test_metrics['accuracy']:.4f}")
         print("="*40 + "\n")
         
         return test_metrics
@@ -104,11 +113,22 @@ class Trainer:
             
         return {"loss": running_loss / len(self.train_loader)}
 
+    def _save_checkpoint(self):
+        torch.save(self.model.state_dict(), "best_model.pth")
+
     def _validate_epoch(self, loader):
         self.model.eval()
         running_loss = 0.0
+        
+        # Listy na wyniki segmentacji
         dice_scores = []
         iou_scores = []
+        
+        # Liczniki do klasyfikacji (Detekcja)
+        tp_total = 0
+        tn_total = 0
+        fp_total = 0
+        fn_total = 0
         
         with torch.no_grad():
             for images, masks, _ in loader:
@@ -118,34 +138,103 @@ class Trainer:
                 loss = self.loss_fn(logits, masks)
                 running_loss += loss.item()
                 
-                # Metrics Calculation
+                # --- Segmentacja ---
                 probs = torch.sigmoid(logits)
                 preds = (probs > 0.5).float()
                 
-                dice = self._dice_coef(preds, masks)
-                iou = self._iou_coef(preds, masks)
+                # Liczymy Dice/IoU per sample (tak jak ustaliliśmy)
+                d, i = self._calculate_metrics_sample_wise(preds, masks)
+                dice_scores.extend(d)
+                iou_scores.extend(i)
                 
-                dice_scores.append(dice)
-                iou_scores.append(iou)
-                
+                # --- Detekcja (Klasyfikacja) ---
+                # Wyciągamy statystyki TP, TN, FP, FN dla tego batcha
+                batch_cls_stats = self._calculate_classification_stats(preds, masks)
+                tp_total += batch_cls_stats['tp']
+                tn_total += batch_cls_stats['tn']
+                fp_total += batch_cls_stats['fp']
+                fn_total += batch_cls_stats['fn']
+
+        # Obliczamy średnie metryki segmentacji
+        mean_dice = np.mean(dice_scores)
+        mean_iou = np.mean(iou_scores)
+        
+        # Obliczamy metryki klasyfikacji (zabezpieczenie przed dzieleniem przez 0)
+        epsilon = 1e-6
+        sensitivity = tp_total / (tp_total + fn_total + epsilon) # Recall
+        specificity = tn_total / (tn_total + fp_total + epsilon)
+        accuracy    = (tp_total + tn_total) / (tp_total + tn_total + fp_total + fn_total + epsilon)
+        
         return {
             "loss": running_loss / len(loader),
-            "dice": np.mean(dice_scores),
-            "iou": np.mean(iou_scores)
+            "dice": mean_dice,
+            "iou": mean_iou,
+            # Nowe metryki
+            "sensitivity": sensitivity,
+            "specificity": specificity,
+            "accuracy": accuracy
         }
 
-    def _dice_coef(self, preds, targets, smooth=1e-6):
-        preds = preds.view(-1)
-        targets = targets.view(-1)
-        intersection = (preds * targets).sum()
-        return ((2. * intersection + smooth) / (preds.sum() + targets.sum() + smooth)).item()
+    def _calculate_classification_stats(self, preds, targets):
+        """
+        Ocenia zdolność detekcji modelu (Czy wykrył odmę, czy nie?).
+        Używa progu powierzchni (pixel_threshold) z configu.
+        """
+        # Pobieramy próg z konfigu (np. 100 pikseli), domyślnie 0
+        pixel_thresh = self.config['train'].get('pixel_threshold', 0)
+        
+        batch_size = preds.shape[0]
+        
+        # Spłaszczamy obrazy do wektora (Batch, Pixels)
+        preds_flat = preds.view(batch_size, -1)
+        targets_flat = targets.view(batch_size, -1)
+        
+        # Zliczamy zapalone piksele dla każdego obrazka
+        pred_areas = preds_flat.sum(1)   # Ile pikseli przewidział model
+        target_areas = targets_flat.sum(1) # Ile pikseli jest w prawdzie
+        
+        # Klasyfikacja: 1 (Chory) jeśli obszar > próg, w przeciwnym razie 0 (Zdrowy)
+        # Dla Targetu: Chory jeśli ma > 0 pikseli (zakładamy że maska ground truth jest czysta)
+        is_positive_pred = (pred_areas > pixel_thresh).float()
+        is_positive_true = (target_areas > 0).float()
+        
+        # Obliczamy TP, TN, FP, FN
+        tp = ((is_positive_pred == 1) & (is_positive_true == 1)).sum().item()
+        tn = ((is_positive_pred == 0) & (is_positive_true == 0)).sum().item()
+        fp = ((is_positive_pred == 1) & (is_positive_true == 0)).sum().item()
+        fn = ((is_positive_pred == 0) & (is_positive_true == 1)).sum().item()
+        
+        return {'tp': tp, 'tn': tn, 'fp': fp, 'fn': fn}
 
-    def _iou_coef(self, preds, targets, smooth=1e-6):
-        preds = preds.view(-1)
-        targets = targets.view(-1)
-        intersection = (preds * targets).sum()
-        union = preds.sum() + targets.sum() - intersection
-        return ((intersection + smooth) / (union + smooth)).item()
+    # ... (Metoda _calculate_metrics_sample_wise pozostaje bez zmian z poprzedniej odpowiedzi) ...
 
-    def _save_checkpoint(self):
-        torch.save(self.model.state_dict(), "best_model.pth")
+    def _calculate_metrics_sample_wise(self, preds, targets, smooth=1e-6):
+        """
+        Calculates Dice and IoU for each image in the batch separately.
+        Returns lists of scores.
+        """
+        batch_size = preds.shape[0]
+        dice_list = []
+        iou_list = []
+        
+        # Spłaszczamy tylko wymiary przestrzenne (H, W), zachowując Batch (N)
+        # preds: (N, 1, H, W) -> (N, -1)
+        preds_flat = preds.view(batch_size, -1)
+        targets_flat = targets.view(batch_size, -1)
+        
+        # Liczymy dla każdego obrazka w pętli lub wektorowo
+        intersection = (preds_flat * targets_flat).sum(1) # Suma wzdłuż osi pikseli
+        
+        # Sumy pikseli dla każdego obrazka
+        p_sum = preds_flat.sum(1)
+        t_sum = targets_flat.sum(1)
+        
+        # Dice dla każdego obrazka: (2*I + e) / (U + e)
+        dices = (2. * intersection + smooth) / (p_sum + t_sum + smooth)
+        
+        # IoU dla każdego obrazka: (I + e) / (U - I + e)
+        union = p_sum + t_sum - intersection
+        ious = (intersection + smooth) / (union + smooth)
+        
+        # Konwersja na listę Pythonową
+        return dices.cpu().numpy().tolist(), ious.cpu().numpy().tolist()
