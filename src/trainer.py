@@ -46,7 +46,7 @@ class Trainer:
             
             # 2. Validation
             val_metrics = self._validate_epoch(self.val_loader)
-            print(f"VALID | Loss: {val_metrics['loss']:.4f} | Dice: {val_metrics['dice']:.4f}")
+            print(f"VALID | Loss: {val_metrics['loss']:.4f} | Dice: {val_metrics['dice']:.4f} | IoU: {val_metrics['iou']:.4f}")
             print(f"      | Sens: {val_metrics['sensitivity']:.4f} | Spec: {val_metrics['specificity']:.4f} | Acc: {val_metrics['accuracy']:.4f}")
             
             # Logowanie metryk walidacyjnych
@@ -147,7 +147,7 @@ class Trainer:
                 
                 # --- Segmentacja ---
                 probs = torch.sigmoid(logits)
-                preds = (probs > 0.5).float()
+                preds = (probs > 0.2).float()
                 
                 d, i = self._calculate_metrics_sample_wise(preds, masks)
                 dice_scores.extend(d)
