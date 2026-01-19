@@ -77,55 +77,42 @@ class Trainer:
         print(f"Best Model saved to:  best_model.pth")
         print("="*40 + "\n")
 
-    def evaluate(self, test_loader):
+    # W klasie Trainer:
+
+    def evaluate(self, test_loader, custom_prob_thresh=None, custom_pixel_thresh=None):
         """
         Loads the best model weights and evaluates on the Test set.
+        Allows overriding thresholds for experimentation.
         """
-        print("[INFO] Loading best model for testing...")
-        try:
-            self.model.load_state_dict(torch.load("best_model.pth"))
-            print("[INFO] Weights loaded successfully.")
-        except FileNotFoundError:
-            print("[WARNING] 'best_model.pth' not found! Testing with current weights.")
+        # Ładowanie wag tylko jeśli model nie jest już załadowany (dla optymalizacji w pętli)
+        # Zakładamy, że w pętli Grid Search ładujemy wagi raz na zewnątrz, 
+        # ale dla bezpieczeństwa zostawiamy tryb domyślny.
+        if custom_prob_thresh is None:
+             # Logika ładowania tylko przy pierwszym uruchomieniu lub domyślnym
+            print("[INFO] Loading best model for testing...")
+            try:
+                self.model.load_state_dict(torch.load("best_model.pth"))
+                print("[INFO] Weights loaded successfully.")
+            except FileNotFoundError:
+                print("[WARNING] 'best_model.pth' not found! Testing with current weights.")
 
-        print("\n--- Starting Evaluation on TEST Set ---")
-        test_metrics = self._validate_epoch(test_loader)
+        # Ustalanie progów (albo niestandardowe, albo z configu)
+        prob_thresh = custom_prob_thresh if custom_prob_thresh is not None else 0.5
+        # Domyślnie z configu, chyba że nadpiszemy
+        pixel_thresh = custom_pixel_thresh if custom_pixel_thresh is not None else self.config['train'].get('pixel_threshold', 0)
+
+        if custom_prob_thresh:
+            print(f"\n--- Evaluation with CUSTOM Thresholds: Prob > {prob_thresh}, Area > {pixel_thresh} px ---")
+        else:
+            print("\n--- Starting Evaluation on TEST Set (Default Config) ---")
+            
+        # Przekazujemy progi dalej
+        test_metrics = self._validate_epoch(test_loader, prob_thresh, pixel_thresh)
         
-        print("\n" + "="*40)
-        print("       TEST SET RESULTS")
-        print("="*40)
-        print(f"Test Loss: {test_metrics['loss']:.4f}")
-        print(f"Test Dice: {test_metrics['dice']:.4f}")
-        print(f"Test IoU:  {test_metrics['iou']:.4f}")
-        print("-" * 20)
-        print(f"Sensitivity (Recall): {test_metrics['sensitivity']:.4f}")
-        print(f"Specificity:          {test_metrics['specificity']:.4f}")
-        print(f"Classification Acc:   {test_metrics['accuracy']:.4f}")
-        print("="*40 + "\n")
-        
+        print(f"Result -> Dice: {test_metrics['dice']:.4f} | Sens: {test_metrics['sensitivity']:.4f} | Spec: {test_metrics['specificity']:.4f}")
         return test_metrics
 
-    def _train_epoch(self):
-        self.model.train()
-        running_loss = 0.0
-        
-        for images, masks, _ in self.train_loader:
-            images, masks = images.to(self.device), masks.to(self.device)
-            
-            self.optimizer.zero_grad()
-            logits = self.model(images)
-            loss = self.loss_fn(logits, masks)
-            loss.backward()
-            self.optimizer.step()
-            
-            running_loss += loss.item()
-            
-        return {"loss": running_loss / len(self.train_loader)}
-
-    def _save_checkpoint(self):
-        torch.save(self.model.state_dict(), "best_model.pth")
-
-    def _validate_epoch(self, loader):
+    def _validate_epoch(self, loader, prob_thresh=0.5, pixel_thresh=0):
         self.model.eval()
         running_loss = 0.0
         
@@ -145,16 +132,17 @@ class Trainer:
                 loss = self.loss_fn(logits, masks)
                 running_loss += loss.item()
                 
-                # --- Segmentacja ---
                 probs = torch.sigmoid(logits)
-                preds = (probs > 0.2).float()
+                
+                # UŻYWAMY PRZEKAZANEGO PROGU (np. 0.2 zamiast 0.5)
+                preds = (probs > prob_thresh).float()
                 
                 d, i = self._calculate_metrics_sample_wise(preds, masks)
                 dice_scores.extend(d)
                 iou_scores.extend(i)
                 
-                # --- Detekcja (Klasyfikacja) ---
-                batch_cls_stats = self._calculate_classification_stats(preds, masks)
+                # UŻYWAMY PRZEKAZANEGO PROGU PIKSELI
+                batch_cls_stats = self._calculate_classification_stats(preds, masks, pixel_thresh)
                 tp_total += batch_cls_stats['tp']
                 tn_total += batch_cls_stats['tn']
                 fp_total += batch_cls_stats['fp']
@@ -177,8 +165,8 @@ class Trainer:
             "accuracy": accuracy
         }
 
-    def _calculate_classification_stats(self, preds, targets):
-        pixel_thresh = self.config['train'].get('pixel_threshold', 0)
+    def _calculate_classification_stats(self, preds, targets, pixel_thresh):
+        # Ta metoda teraz przyjmuje pixel_thresh jako argument
         batch_size = preds.shape[0]
         
         preds_flat = preds.view(batch_size, -1)
@@ -196,6 +184,26 @@ class Trainer:
         fn = ((is_positive_pred == 0) & (is_positive_true == 1)).sum().item()
         
         return {'tp': tp, 'tn': tn, 'fp': fp, 'fn': fn}
+
+    def _train_epoch(self):
+        self.model.train()
+        running_loss = 0.0
+        
+        for images, masks, _ in self.train_loader:
+            images, masks = images.to(self.device), masks.to(self.device)
+            
+            self.optimizer.zero_grad()
+            logits = self.model(images)
+            loss = self.loss_fn(logits, masks)
+            loss.backward()
+            self.optimizer.step()
+            
+            running_loss += loss.item()
+            
+        return {"loss": running_loss / len(self.train_loader)}
+
+    def _save_checkpoint(self):
+        torch.save(self.model.state_dict(), "best_model.pth")
 
     def _calculate_metrics_sample_wise(self, preds, targets, smooth=1e-6):
         batch_size = preds.shape[0]
