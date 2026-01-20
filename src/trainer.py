@@ -3,6 +3,8 @@ import numpy as np
 from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
 import os
+import time
+import datetime # Do ładnego formatowania czasu (HH:MM:SS)
 
 class Trainer:
     """
@@ -36,6 +38,8 @@ class Trainer:
         print(f"[INFO] Starting training experiment: {exp_name}")
         print(f"[INFO] Total epochs: {epochs}")
         
+        start_time = time.time()
+
         for epoch in range(epochs):
             print(f"\n--- Epoch {epoch+1}/{epochs} ---")
             
@@ -65,6 +69,9 @@ class Trainer:
             else:
                 print(f"[INFO] Dice did not improve (Best: {self.best_score:.4f})")
         
+        total_time_seconds = time.time() - start_time
+        # Formatowanie sekund na czytelny string HH:MM:SS
+        total_time_str = str(datetime.timedelta(seconds=int(total_time_seconds)))
         # Zamknięcie writera po zakończeniu treningu
         self.writer.close()
 
@@ -72,6 +79,7 @@ class Trainer:
         print("\n" + "="*40)
         print("       TRAINING COMPLETE")
         print("="*40)
+        print(f"Total Training Time:  {total_time_str}")
         print(f"Best Validation Dice: {self.best_metrics.get('dice', 0):.4f}")
         print(f"Best Validation IoU:  {self.best_metrics.get('iou', 0):.4f}")
         print(f"Best Model saved to:  best_model.pth")
