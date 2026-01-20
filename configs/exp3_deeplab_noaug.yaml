@@ -12,10 +12,10 @@ train:
   architecture: "DeepLabV3"
   encoder_name: "resnet50"
   pretrained: true
-  batch_size: 16
+  batch_size: 8
   epochs: 25
   learning_rate: 0.0001
-  pixel_threshold: 100
+  pixel_threshold: 20
   
   # NO AUGMENTATION
   use_augmentation: false
